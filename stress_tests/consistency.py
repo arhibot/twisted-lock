@@ -22,7 +22,7 @@ NUM_DATA_SLOTS = 2
 NUM_ITERATIONS = 10
 RANDOM_SERVER = True
 KILL_PROBABLITITY = 0.0
-STUCK_TIME_LIMIT = 60
+STUCK_TIME_LIMIT = 120
 
 logger = Logger()
 socket.setdefaulttimeout(5)
@@ -41,6 +41,7 @@ _server_distribution = dict(
     (worker_id, random.randint(1, NUM_SERVERS))
     for worker_id in range(NUM_SERVERS)
 )
+
 
 def choose_server(worker_id):
     if RANDOM_SERVER:
@@ -77,17 +78,32 @@ def stop(servers):
         server.stop()
 
 def compare_logs():
+    def unify_logs(logs):
+        min_events = min(len(x) for x in logs)
+        max_events = max(len(x) for x in logs)
+        if max_events == min_events:
+            return logs
+        data = defaultdict(list)
+        for x, servers in logs.iteritems():
+            data[x[len(x) - min_events:]] = servers
+        return data
+
+    log_to_string = lambda logs: '\n'.join('%3d %s' % (lineno+1, line)
+                                           for lineno, line in enumerate(logs))
+
+
     data = defaultdict(list)
     for x in range(1, NUM_SERVERS+1):
         log = urllib2.urlopen('http://127.0.0.1:900%d/info/log' % x).read()
-        log = '\n'.join(
-            '%3d %s' % (lineno+1, line)
-            for lineno, line in filter(None, enumerate(log.split('\n')))
+        log = tuple(
+            '%s' % line
+            for line in filter(None, log.split('\n'))
         )
         data[log].append(x)
         with open('/tmp/%s' % x, 'w') as f:
-            f.write(log)
+            f.write(log_to_string(log))
 
+    data = unify_logs(data)
     if len(data) == 1:
         logger.info('Logs are equal')
         return 0
@@ -95,7 +111,7 @@ def compare_logs():
         for log, servers in data.iteritems():
             logger.error('Log from servers %s:\n%s' % (
                 ', '.join(map(str, servers)),
-                log
+                log_to_string(log)
             ))
         return 8
 
@@ -140,7 +156,8 @@ class Worker(threading.Thread):
                 if len(locked) == NUM_DATA_SLOTS:
                     num_fails_in_sequence = 0
                     for data_id in range(NUM_DATA_SLOTS):
-                        self.d[data_id].append(self.id)
+                        with self._lock:
+                            self.d[data_id].append(self.id)
                     iterations_left -= 1
                     logger.info('decrement: locked=%r' % (locked,))
                 else:

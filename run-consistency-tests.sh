@@ -12,6 +12,7 @@ function notify()
 
 for ITER in `seq $MAX_TRIES`
 do
+    echo "Begin iteration: $ITER"
     rm -f stress_tests/log/*.log
 
     ./stress_tests/consistency.py

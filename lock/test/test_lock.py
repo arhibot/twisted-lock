@@ -338,10 +338,10 @@ class Sync(TestCase):
         calls = lambda s: [item[0] for item in s.syncronizer.method_calls]
 
         other_calls = reduce(operator.add, (calls(s) for s in self.servers[1:]))
-        self.assertEqual(['on_sync_subscribe'], other_calls)
+        self.assertEqual(['on_sync_subscribe'], [x for x in other_calls if x != 'encode_state'])
         # No on_sync_snapshot', 'unsubscribe' should be called because two
         # other nodes are stale
-        self.assertEqual(['subscribe'], calls(ns))
+        self.assertEqual(['subscribe'], [x for x in calls(ns) if x != 'encode_state'])
 
     @inlineCallbacks
     def test_choose_another_master(self):

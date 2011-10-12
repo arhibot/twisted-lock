@@ -39,6 +39,15 @@ class Syncronizer(object):
         self._subscribers = set()
         self._syncing_with_node = None
 
+    def encode_state(self):
+        data = dict(
+            keys=self._factory._keys,
+            epoch=self._factory._epoch,
+            paxos=self._factory.paxos.get_state(),
+            )
+        return base64.b64encode(pickle.dumps(data))
+
+
     def on_sync_snapshot(self, line, client = None):
         if self._syncing_with_node is not None:
             cmd_name, data = line.split(' ', 1)
@@ -53,13 +62,9 @@ class Syncronizer(object):
     def on_sync_subscribe(self, line, client = None):
         if not self._factory.get_stale():
             self._subscribers.add(client)
-            data = dict(
-                keys=self._factory._keys,
-                epoch=self._factory._epoch,
-                paxos=self._factory.paxos.get_state(),
-            )
+            data = self.encode_state()
             client.sendLine(
-                'sync_snapshot ' + base64.b64encode(pickle.dumps(data))
+                'sync_snapshot ' + data
             )
 
     def on_sync_unsubscribe(self, line, client = None):
@@ -110,9 +115,11 @@ class LockProtocol(LineReceiver):
 
     def connectionMade(self):
         self.on_connect()
-        self.sendLine('params %s %s' % (
+        state = self.factory.syncronizer.encode_state()
+        self.sendLine('params %s %s %s' % (
             self.factory.http_interface,
             self.factory.http_port,
+            state,
         ))
 
     def connectionLost(self, reason):
@@ -124,7 +131,13 @@ class LockProtocol(LineReceiver):
         if line.startswith('params '):
             args = line.split()[1:]
             self.http = args[0], int(args[1])
-
+            data = pickle.loads(base64.b64decode(args[2]))
+            if (self.factory.master is None and
+                data['paxos']['last_accepted_id'] > self.factory.paxos.last_accepted_id):
+                self.factory._keys = data['keys']
+                self.factory._epoch = data['epoch']
+                self.factory.paxos.set_state(data['paxos'])
+                self.factory.set_stale(False)
         else:
             cmd = self.factory.find_callback(line)
             if cmd is None:
